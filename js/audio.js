@@ -53,6 +53,17 @@ export class TrainAudio {
     return !!this.ctx;
   }
 
+  // ヘッドセットの中に入ったときや、一時停止から戻ったときに止まっていることがあるので、再開を試みる
+  resume() {
+    if (!this.ctx || this.ctx.state === 'running' || this.ctx.state === 'closed') return;
+    try {
+      const p = this.ctx.resume();
+      if (p && p.catch) p.catch(() => {});
+    } catch (e) {
+      // 次の機会にまた試す
+    }
+  }
+
   _impulse(sec) {
     const ctx = this.ctx;
     const len = Math.floor(ctx.sampleRate * sec);
@@ -248,6 +259,11 @@ export class TrainAudio {
     const d = this.target - this.speed;
     this.speed += Math.sign(d) * Math.min(Math.abs(d), (this.rate || 0.06) * dt);
     const accel = (this.speed - prev) / Math.max(dt, 1e-3);
+    this.resumeT = (this.resumeT || 0) + dt;
+    if (this.resumeT > 1) {
+      this.resumeT = 0;
+      this.resume();
+    }
     this.level += (this.levelTarget - this.level) * Math.min(1, dt * 0.4);
     if (!this.ctx || !this.loops.length) return accel;
     const now = this.ctx.currentTime;
@@ -347,6 +363,33 @@ export class TrainAudio {
     this._tone(dest, t, freq, dur, peak);
     this._tone(dest, t, freq * 2.01, dur * 0.5, peak * 0.25);
     this._tone(dest, t, freq * 3.02, dur * 0.25, peak * 0.08);
+  }
+
+  // 車内アナウンスの声（車内スピーカーらしく、低音と高音を削って少し響かせる）
+  playVoice(buffer) {
+    if (!this._ok()) return null;
+    const ctx = this.ctx;
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;
+    const hp = ctx.createBiquadFilter();
+    hp.type = 'highpass';
+    hp.frequency.value = 280;
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 4800;
+    const pk = ctx.createBiquadFilter();
+    pk.type = 'peaking';
+    pk.frequency.value = 1800;
+    pk.gain.value = 4;
+    const g = ctx.createGain();
+    g.gain.value = 1.3;
+    src.connect(hp).connect(lp).connect(pk).connect(g);
+    g.connect(this.master);
+    const w = ctx.createGain();
+    w.gain.value = 0.45;
+    g.connect(w).connect(this.reverb);
+    src.start(ctx.currentTime + 0.02);
+    return src;
   }
 
   // 案内放送の前のチャイム（上がって、下がる）

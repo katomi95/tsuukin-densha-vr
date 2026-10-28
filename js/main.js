@@ -52,7 +52,6 @@ writeForm(settings);
 form.volume.addEventListener('input', () => {
   form.volumeOut.value = form.volume.value;
   audio.setVolume(form.volume.value / 100);
-  voice.volume = form.volume.value / 100;
 });
 $('settings').addEventListener('submit', (e) => e.preventDefault());
 
@@ -77,20 +76,14 @@ scene.add(car.root);
 const board = new TextBoard();
 car.root.add(board.mesh);
 const audio = new TrainAudio();
-const voice = new Announcer();
+const voice = new Announcer(audio);
 const director = new Director(car, audio, voice, board);
 if (FORCE_EVENTS) director.forceEvents = FORCE_EVENTS;
 
 const endButton = new EndButton();
 scene.add(endButton.mesh);
 
-voice.status().then((st) => {
-  form.voiceStatus.textContent = {
-    ok: `車内アナウンスは、この端末の日本語の音声合成で読み上げます（${voice.voice.name}）。`,
-    'no-api': 'このブラウザは音声合成に対応していないため、アナウンスはチャイムと車内の電光掲示だけになります。',
-    'no-ja': 'この端末には日本語の音声合成がないため、アナウンスはチャイムと車内の電光掲示だけになります。',
-  }[st];
-});
+form.voiceStatus.textContent = '声：VOICEVOX:No.7（アナウンス）。オフにすると、チャイムと車内の電光掲示だけになります。';
 
 // ---------- 状態 ----------
 const state = {
@@ -129,7 +122,7 @@ function beginRide() {
   audio.setVolume(settings.volume);
   audio.start();
   voice.enabled = settings.voice;
-  voice.volume = settings.volume;
+  voice.load();
   director.begin({ crowd: CROWD[settings.crowd], room: ROOM[settings.room], ringY, seed: SEED ?? Date.now() });
   updateHead();
   if (SKIP_TO > 0) director.fastForward(SKIP_TO);
@@ -199,6 +192,7 @@ for (let i = 0; i < 2; i++) {
   // トリガーを引き切ったとき／ピンチしたとき
   c.addEventListener('select', () => {
     if (!state.xr) return;
+    audio.resume();
     controllerRay(c);
     onSelect(raycaster);
   });
@@ -210,7 +204,9 @@ async function startXR() {
   settings = readForm();
   saveSettings(settings);
   audio.init(); // ボタン操作の中で音を有効化しておく
+  audio.resume();
   audio.setVolume(settings.volume);
+  voice.load();
   startBtn.disabled = true;
   setStatus('起動中…');
   let session;
@@ -240,6 +236,9 @@ async function startXR() {
     return;
   }
   session.addEventListener('end', onXREnd);
+  // ヘッドセットの中に入ると音が止まっていることがあるので、もう一度再開する
+  audio.resume();
+  session.addEventListener('visibilitychange', () => audio.resume());
   state.xr = true;
   state.ready = false;
   state.mode = 'wait';
@@ -368,7 +367,9 @@ function startPreview() {
   settings = readForm();
   saveSettings(settings);
   audio.init();
+  audio.resume();
   audio.setVolume(settings.volume);
+  voice.load();
   state.xr = false;
   state.floorKnown = true;
   state.floorY = 0;

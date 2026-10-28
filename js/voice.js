@@ -1,81 +1,60 @@
-// 車内アナウンスの声。端末に入っている日本語の音声合成（Web Speech API）で読み上げる。
-// 録音した声や実在の鉄道会社の放送は使わない。日本語の音声が無い環境では黙る
-// （そのときも、チャイムと車内案内表示の文字でアナウンスは伝わる）。
+// 車内アナウンスの声。VOICEVOX（No.7・アナウンス）で作った音声ファイルを WebAudio で鳴らす。
+// 端末の音声合成（speechSynthesis）は Quest Browser では日本語の声が無く鳴らないため使わない。
+// ファイルは voice/<key>.wav。読み込めなかった声は黙る（チャイムと電光掲示の文字は出る）。
+export const VOICE_KEYS = [
+  'manin', 'next', 'next2', 'delay1', 'delay2', 'delay3', 'brake', 'manner',
+  'endless1', 'endless2', 'endless3', 'shuuten', 'shihatsu',
+];
+
 export class Announcer {
-  constructor() {
-    this.supported = typeof window !== 'undefined' && 'speechSynthesis' in window && 'SpeechSynthesisUtterance' in window;
-    this.voice = null;
+  constructor(audio) {
+    this.audio = audio;
+    this.buffers = new Map();
     this.enabled = true;
     this.silent = false; // 早送り中は黙る
-    this.volume = 0.8;
-    this._ready = this.supported ? this._findVoice() : Promise.resolve(null);
+    this.loading = null;
+    this.playing = [];
   }
 
-  _findVoice() {
-    return new Promise((resolve) => {
-      const pick = () => {
-        const list = window.speechSynthesis.getVoices() || [];
-        const ja = list.filter((v) => /^ja(-|_|$)/i.test(v.lang));
-        if (!ja.length) return null;
-        // 自動放送らしく、落ち着いた女性の声があれば優先
-        return ja.find((v) => /Kyoko|Haruka|Nanami|Ayumi|Sayaka|female|女性/i.test(v.name)) || ja[0];
-      };
-      let v = pick();
-      if (v) {
-        this.voice = v;
-        resolve(v);
-        return;
+  // AudioContext ができてから呼ぶ（何度呼んでもよい）
+  load() {
+    if (this.loading || !this.audio.ctx) return this.loading;
+    const ctx = this.audio.ctx;
+    this.loading = Promise.all(VOICE_KEYS.map(async (k) => {
+      try {
+        const res = await fetch(`voice/${k}.wav`);
+        if (!res.ok) throw new Error(res.status);
+        const data = await res.arrayBuffer();
+        const buf = await new Promise((ok, ng) => ctx.decodeAudioData(data, ok, ng));
+        this.buffers.set(k, buf);
+      } catch (e) {
+        console.warn('アナウンスを読み込めませんでした', k, e);
       }
-      const done = () => {
-        v = pick();
-        if (v) {
-          this.voice = v;
-          window.speechSynthesis.removeEventListener('voiceschanged', done);
-          resolve(v);
-        }
-      };
-      window.speechSynthesis.addEventListener('voiceschanged', done);
-      setTimeout(() => {
-        window.speechSynthesis.removeEventListener('voiceschanged', done);
-        if (!this.voice) this.voice = pick();
-        resolve(this.voice);
-      }, 2500);
-    });
+    }));
+    return this.loading;
   }
 
-  // 'ok' | 'no-api' | 'no-ja'
-  async status() {
-    if (!this.supported) return 'no-api';
-    await this._ready;
-    return this.voice ? 'ok' : 'no-ja';
+  // 秒。まだ読み込めていなければ null
+  duration(key) {
+    const b = this.buffers.get(key);
+    return b ? b.duration : null;
   }
 
-  get available() {
-    return this.enabled && !this.silent && !!this.voice;
-  }
-
-  say(text) {
-    if (!this.available) return false;
-    try {
-      const u = new SpeechSynthesisUtterance(text);
-      u.voice = this.voice;
-      u.lang = this.voice.lang;
-      u.rate = 0.9;
-      u.pitch = 1.0;
-      u.volume = Math.min(1, this.volume);
-      window.speechSynthesis.speak(u);
-      return true;
-    } catch (e) {
-      return false;
-    }
+  say(key) {
+    if (!this.enabled || this.silent) return false;
+    const b = this.buffers.get(key);
+    if (!b) return false;
+    const src = this.audio.playVoice(b);
+    if (!src) return false;
+    this.playing.push(src);
+    src.onended = () => { this.playing = this.playing.filter((s) => s !== src); };
+    return true;
   }
 
   cancel() {
-    if (!this.supported) return;
-    try {
-      window.speechSynthesis.cancel();
-    } catch (e) {
-      // 何もしない
+    for (const s of this.playing) {
+      try { s.stop(); } catch (e) { /* 止まっている */ }
     }
+    this.playing = [];
   }
 }

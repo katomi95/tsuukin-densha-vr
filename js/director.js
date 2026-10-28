@@ -137,14 +137,14 @@ export class Director {
       at(T.title, () => this._title());
       at(T.titleOff, () => this.board.hide(0.6));
       at(T.manin - 0.5, () => { this.car.led.group.visible = true; });
-      at(T.manin, () => this.announce(ANN.manin, { led: 'orange' }));
+      at(T.manin, () => this.announce('manin', { led: 'orange' }));
     }
     at(T.straps1, () => this.car.straps.reveal(1, 0.12));
     const C = this.crowd.c;
     for (let i = 0; i < C[0]; i++) at(T.p1 + i * T.p1Gap, () => this.spawn({ rMin: 1.1, mode: 'fade' }));
     at(T.p1 + 3, () => this._ledIdle(true));
     at(T.depart1, () => this.audio.drive(0.7, 0.07));
-    at(T.next1, () => this.announce(ANN.next));
+    at(T.next1, () => this.announce('next'));
     at(T.brake1, () => this.audio.drive(0, 0.09));
     at(T.brake1 + 4.5, () => this.audio.brake(3.6));
     at(T.door1 - 0.5, () => this._arrived());
@@ -164,7 +164,7 @@ export class Director {
     at(T.depart2, () => this.audio.drive(0.8, 0.07));
     at(T.phone, () => this._phoneGuy());
     at(T.e1, () => this.event(plan[0]));
-    at(T.next2, () => this.announce(ANN.next2));
+    at(T.next2, () => this.announce('next2'));
     at(T.brake2, () => this.audio.drive(0, 0.09));
     at(T.brake2 + 4.5, () => this.audio.brake(3.6));
     at(T.door2 - 0.5, () => this._arrived());
@@ -186,15 +186,15 @@ export class Director {
       this.audio.brake(4);
     });
     at(T.stop3 + 8, () => this._ledIdle(true));
-    at(T.delay1, () => this.announce(ANN.delay1, { led: 'red' }));
-    at(T.delay2, () => this.announce(ANN.delay2, { led: 'red' }));
-    at(T.delay3, () => this.announce(ANN.delay3, { led: 'red' }));
+    at(T.delay1, () => this.announce('delay1', { led: 'red' }));
+    at(T.delay2, () => this.announce('delay2', { led: 'red' }));
+    at(T.delay3, () => this.announce('delay3', { led: 'red' }));
     at(T.compressor, () => this.audio.compressor(this._world(0, 0.2, this.R * 0.8), 7));
     at(T.e3, () => this.event(plan[2]));
     // 終点
     at(T.resume, () => this.audio.drive(0.35, 0.05));
     at(T.shuuten, () => {
-      this.announce(ANN.shuuten, { led: 'orange', hold: true });
+      this.announce('shuuten', { led: 'orange', hold: true });
       this.car.led.show({ type: 'next', head: 'まもなく', name: '終点 自宅', color: 'orange' });
     });
     at(T.arrive, () => {
@@ -219,7 +219,7 @@ export class Director {
       this.audio.mute(false, 0.3);
       this.car.led.group.visible = true;
       this.car.led.show({ type: 'next', head: 'まもなく', name: '始発 自宅', color: 'green' });
-      this.announce(ANN.shihatsu, { hold: true });
+      this.announce('shihatsu', { hold: true });
     });
     at(T.loop, () => {
       this.loop++;
@@ -271,10 +271,16 @@ export class Director {
   }
 
   // ---------- アナウンス ----------
-  // チャイム → 声と電光掲示。前のアナウンスと重ならないようにずらす
-  announce(text, { led = 'orange', chime = true, hold = false } = {}) {
+  // アナウンスの長さ（声のファイルが読めていればその長さ、無ければ文字数から）
+  _annDur(key) {
+    return this.voice.duration(key) ?? 2.2 + ANN[key].length * 0.17;
+  }
+
+  // チャイム → 声と電光掲示。前のアナウンスと重ならないようにずらす。key は ANN のキー
+  announce(key, { led = 'orange', chime = true, hold = false } = {}) {
+    const text = ANN[key];
     const wait = Math.max(0, this.annBusy - this.time);
-    const dur = 2.2 + text.length * 0.17;
+    const dur = this._annDur(key) + (chime ? 1.2 : 0);
     this.annBusy = this.time + wait + dur + 0.8;
     this.tasks.push({
       t: -wait,
@@ -290,7 +296,7 @@ export class Director {
         }
         if (task.t >= (chime ? 1.2 : 0) && !task.said) {
           task.said = true;
-          this.voice.say(text);
+          this.voice.say(key);
         }
         if (task.t >= dur + 2) {
           if (!hold) this._ledIdle(true);
@@ -567,7 +573,7 @@ export class Director {
 
   // 急ブレーキ：乗客だけが一斉に傾く（視点や部屋は揺らさない）
   _evBrake() {
-    this.announce(ANN.brake, { led: 'red' });
+    this.announce('brake', { led: 'red' });
     const resume = this.audio.target;
     this.tasks.push({ t: 0, update: (task, dt) => {
       task.t += dt;
@@ -627,8 +633,8 @@ export class Director {
 
   // マナーモードのお願い → 直後に、何人もの着信音が一斉に鳴る
   _evManner() {
-    this.announce(ANN.manner);
-    const dur = 2.2 + ANN.manner.length * 0.17;
+    this.announce('manner');
+    const dur = this._annDur('manner') + 1.2;
     this.tasks.push({ t: 0, update: (task, dt) => {
       task.t += dt;
       if (task.t < dur + 0.6) return false;
@@ -715,16 +721,16 @@ export class Director {
 
   // 終わらない遅延
   _evDelay() {
-    this.announce(ANN.endless1, { led: 'red' });
+    this.announce('endless1', { led: 'red' });
     this.tasks.push({ t: 0, update: (task, dt) => {
       task.t += dt;
       if (task.t > 9 && !task.a) {
         task.a = true;
-        this.announce(ANN.endless2, { led: 'red' });
+        this.announce('endless2', { led: 'red' });
       }
       if (task.t > 18 && !task.b) {
         task.b = true;
-        this.announce(ANN.endless3, { led: 'orange' });
+        this.announce('endless3', { led: 'orange' });
         return true;
       }
       return false;
